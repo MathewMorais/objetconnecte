@@ -372,22 +372,22 @@ void loop() {
     }
     if(digitalRead(pinPompe) == HIGH)
     {
-        //Serial.println("Ouvert : "+String((time(&now) % (pompePause * 60))));
+        Serial.println("Ouvert : "+String((time(&now) % (pompePause * 60))));
         //if(dureePompeTimer >= (pompeDuree*60000))
         if( (time(&now) % (pompeDuree * 60)) == 0)
         {
             digitalWrite(pinPompe, LOW);
-            delay(1000);
+            delay(3000);
         }
     }
     else if(digitalRead(pinPompe) == LOW)
     {
-        //Serial.println("Ferme : "+String((time(&now) % (pompePause * 60))));
+        Serial.println("Ferme : "+String((time(&now) % (pompePause * 60))));
         //if(PausePompeTimer  >= (pompePause*60000)) 
         if( (time(&now) % (pompePause * 60)) == 0)
         {
             digitalWrite(pinPompe, HIGH);
-            delay(1000);
+            delay(3000);
         }
     }
     displayoled();
