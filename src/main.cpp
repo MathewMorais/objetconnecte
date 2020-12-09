@@ -1,113 +1,100 @@
 /* Liste des includes pour l'oled */
 #include <Arduino.h>
 #include <WiFiManager.h>
-#include <string>
-#include <iostream>
-#include <stdio.h>
-#include <stdlib.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
-#include <Adafruit_I2CDevice.h>
-#include <OneWire.h>
-#include <DallasTemperature.h>
+// #include <string>
+// #include <iostream>
+// #include <stdio.h>
+// #include <stdlib.h>
+// #include <Wire.h>
+// #include <Adafruit_GFX.h>
+// #include <Adafruit_SSD1306.h>
+// #include <Adafruit_I2CDevice.h>
+// #include <OneWire.h>
+// #include <DallasTemperature.h>
 #include <ESPAsyncWebServer.h>
 #include <EEPROM.h>
 #include <ArduinoJson.h>
 #include <time.h>
 #include <mbedtls/md.h>
+#include "sensor.h"
+#include "oled.h"
+#include "pompe.h"
 
 using namespace std;
 
 AsyncWebServer server(80);
 WiFiManager wifiManager;
 StaticJsonDocument<200> doc;
-OneWire oneWire(4);
-DallasTemperature sensors(&oneWire);
+// OneWire oneWire(4);
+// DallasTemperature sensors(&oneWire);
 
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define OLED_RESET -1
+// #define SCREEN_WIDTH 128
+// #define SCREEN_HEIGHT 64
+// #define OLED_RESET -1
 
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+// Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 const char* ssid = "Esp32Aquarium";
 const char* password = "Patate123";
 
 char buffer [33];
-float tempCelsius;
 
 time_t now;
+
+Oled oled;
+Senseur senseur;
+Pompe pompe;
 
 String tokenList[10];
 String token;
 
 int heatpadState = LOW;
-int pompeState = LOW;
 int pinHeatpad = 25;
-int pinPompe = 26;
-int tempCibleMax; //EEPROM 0
-int tempCibleMin; //EEPROM 1
-int pompePause;// EEPROM 2
-int pompeDuree;// EEPROM 3
+// int senseur.temperature_max; //EEPROM 0
+// int senseur.temperature_min; //EEPROM 1
 String aquariumNom;// EEPROM 4
 String jsonresponse;
 
-void displayoled()
+void display_oled()
 {
-    String tempCelsiusStr = String(tempCelsius);
-    String tempCibleStr = String(itoa(tempCibleMin,buffer,10))+" - "+String(itoa(tempCibleMax,buffer,10));
-    String pompePauseStr = String(itoa(pompePause,buffer,10));
-    IPAddress ip = WiFi.localIP();
-
-    display.clearDisplay();
-    display.setCursor(0, 0);
-    display.print("Nom : "+aquariumNom);
-    display.setCursor(0, 20);
-    display.print("Temp. eau : "+tempCelsiusStr);
-    display.setCursor(0, 30);
-    display.print("Temp. cible : "+tempCibleStr);
-    display.setCursor(0, 40);
-    if(digitalRead(pinPompe) == HIGH)
+    String pompe_string;
+    if(digitalRead(pompe.pin) == HIGH)
     {
-        display.print("Ouvert : "+pompePauseStr+" minute(s)");
+        pompe_string = "Ouvert : "+String(itoa(pompe.pause,buffer,10))+" minute(s)";
     }
     else
     {
-        display.print("Fermer : "+pompePauseStr+" minute(s)");
+        pompe_string = "Fermer : "+String(itoa(pompe.pause,buffer,10))+" minute(s)";
     }
-    display.setCursor(0, 50);
-    display.print("IP : ");
-    display.print(ip);
-    display.display();
+    String string_array[] = 
+    {
+        "Nom : "+aquariumNom,
+        "Temp. eau : "+String(senseur.temperature_actuelle),
+        "Temp. cible : "+String(itoa(senseur.temperature_min,buffer,10))+" - "+String(itoa(senseur.temperature_max,buffer,10)),
+        pompe_string,
+        "IP : "+WiFi.localIP().toString()
+    };
+    oled.set_display(string_array,5);
 }
 void handle_root(AsyncWebServerRequest *request) {
-    tempCibleMax = EEPROM.read(0);
-    tempCibleMin = EEPROM.read(1);
-    pompePause = EEPROM.read(2);
-    pompeDuree = EEPROM.read(3);
     aquariumNom = EEPROM.readString(4);
 
     if(request->hasParam("aquariumNom"))
     {
-        tempCibleMax = atoi(request->getParam("tempCibleMax")->value().c_str());
-        EEPROM.write(0, tempCibleMax);
-        tempCibleMin = atoi(request->getParam("tempCibleMin")->value().c_str());
-        EEPROM.write(1, tempCibleMin);
-        pompePause = atoi(request->getParam("pompePause")->value().c_str());
-        EEPROM.write(2, pompePause);
-        pompeDuree = atoi(request->getParam("pompeDuree")->value().c_str());
-        EEPROM.write(3, pompeDuree);
+        senseur.set_temperature_max(atoi(request->getParam("senseur.temperature_max")->value().c_str()));
+        senseur.set_temperature_min(atoi(request->getParam("senseur.temperature_min")->value().c_str()));
+        pompe.set_pause(atoi(request->getParam("pompePause")->value().c_str()));
+        pompe.set_duree(atoi(request->getParam("pompeDuree")->value().c_str()));
         aquariumNom = request->getParam("aquariumNom")->value();
         EEPROM.writeString(4, aquariumNom);
         EEPROM.commit();
     }
 
-    String tempCelsiusStr = String(tempCelsius);
-    String tempCibleMinStr = String(itoa(tempCibleMin,buffer,10));
-    String tempCibleMaxStr = String(itoa(tempCibleMax,buffer,10));
-    String pompePauseStr = String(itoa(pompePause,buffer,10));
-    String pompeDureeStr = String(itoa(pompeDuree,buffer,10));
+    String temperature_actuelle_string = String(senseur.temperature_actuelle);
+    String temperature_min_string = String(itoa(senseur.temperature_min,buffer,10));
+    String temperature_max_string = String(itoa(senseur.temperature_max,buffer,10));
+    String pompe_pause_string = String(itoa(pompe.pause,buffer,10));
+    String pompe_duree_string = String(itoa(pompe.duree,buffer,10));
 
     String HTML = "<!doctype html>";
     HTML += "<html>";
@@ -119,11 +106,11 @@ void handle_root(AsyncWebServerRequest *request) {
     HTML += "<body>";
     HTML += "<form action=\"/\" class=\"container\">";
     HTML += "<div class=\"form-group\"><label>Nom de l'aquarium</label><input class=\"form-control\" type=\"text\" name='aquariumNom' value=\""+aquariumNom+"\" /></div>";
-    HTML += "<div class=\"form-group\"><label>Température actuelle</label><input class=\"form-control\" type=\"number\" value=\""+tempCelsiusStr+"\" readonly/></div>";
-    HTML += "<div class=\"form-group\"><label>Température cible minimum</label><input class=\"form-control\" type=\"number\" name=\"tempCibleMin\" value=\""+tempCibleMinStr+"\"/></div>";
-    HTML += "<div class=\"form-group\"><label>Température cible maximum</label><input class=\"form-control\" type=\"number\" name=\"tempCibleMax\" value=\""+tempCibleMaxStr+"\"/></div>";
-    HTML += "<div class=\"form-group\"><label>Pause de la pompe (en minutes)</label><input class=\"form-control\" type='number' name='pompePause' value=\""+pompePauseStr+"\"></div>";
-    HTML += "<div class=\"form-group\"><label>Durée de la pompe (en minutes)</label><input class=\"form-control\" type='number' name='pompeDuree' value=\""+pompeDureeStr+"\"></div>";
+    HTML += "<div class=\"form-group\"><label>Température actuelle</label><input class=\"form-control\" type=\"number\" value=\""+temperature_actuelle_string+"\" readonly/></div>";
+    HTML += "<div class=\"form-group\"><label>Température cible minimum</label><input class=\"form-control\" type=\"number\" name=\"senseur.temperature_min\" value=\""+temperature_min_string+"\"/></div>";
+    HTML += "<div class=\"form-group\"><label>Température cible maximum</label><input class=\"form-control\" type=\"number\" name=\"senseur.temperature_max\" value=\""+temperature_max_string+"\"/></div>";
+    HTML += "<div class=\"form-group\"><label>Pause de la pompe (en minutes)</label><input class=\"form-control\" type='number' name='pompePause' value=\""+pompe_pause_string+"\"></div>";
+    HTML += "<div class=\"form-group\"><label>Durée de la pompe (en minutes)</label><input class=\"form-control\" type='number' name='pompeDuree' value=\""+pompe_duree_string+"\"></div>";
     HTML += "<div class=\"form-group\"><button class=\"btn btn-primary\">Confirmer</button></div>";
     HTML += "</form>";
     HTML += "</body>";
@@ -147,25 +134,8 @@ String random_string(std::size_t length)
 
     return random_string;
 }
-// void addToken(String token)
-// {
-//     for(int i = 0; i < sizeof(tokenList); i++)
-//     {
-//         if(tokenList[i].length() < 4)
-//         {
-//             tokenList[i] = token;
-//         }
-//     }
-// }
 bool checkToken(String tokenheader)
 {
-    // for(int i = 0; i < sizeof(tokenList); i++)
-    // {
-    //     if(tokenList[i] == token)
-    //     {
-    //         return true;
-    //     }
-    // }
     if(tokenheader == token)
     {
         return true;
@@ -181,31 +151,20 @@ void flushTokens()
 }
 void setup() {
     Serial.begin(9600);
-    sensors.begin();
     EEPROM.begin(512);
+    senseur.begin();
+    oled.begin();
+    pompe.begin();
 
     pinMode(pinHeatpad, OUTPUT);// pin pompe
-    pinMode(pinPompe, OUTPUT);// pin heatpad
     digitalWrite(pinHeatpad, LOW);
-    digitalWrite(pinPompe, LOW);
 
-    tempCibleMax = EEPROM.read(0);
-    tempCibleMin = EEPROM.read(1);
-    pompePause = EEPROM.read(2);
-    pompeDuree = EEPROM.read(3);
+    // senseur.temperature_max = EEPROM.read(0);
+    // senseur.temperature_min = EEPROM.read(1);
     aquariumNom = EEPROM.readString(4);
-
     WiFi.mode(WIFI_STA);
     wifiManager.autoConnect(ssid,password);
-    
-    if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { 
-        Serial.println(F("SSD1306 allocation failed"));
-        for(;;);
-    }
     delay(2000);
-    display.setTextSize(1);
-    display.setTextColor(WHITE);
-    displayoled();
 
     server.begin();
     server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
@@ -215,8 +174,7 @@ void setup() {
         jsonresponse = "";
         if(request->getParam("username")->value() == "admin" && request->getParam("password")->value() == "admin")
         {
-            token = String(time(&now)) + String("_de") + String(random_string(15));
-            doc["_token"] = token;
+            doc["_token"] = token = String(time(&now)) + String("_de") + String(random_string(15));
         }
         serializeJsonPretty(doc,jsonresponse);
         doc.clear();
@@ -224,35 +182,35 @@ void setup() {
     });
     server.on("/obtenirTemperatureCelsius", HTTP_GET, [](AsyncWebServerRequest *request){
         jsonresponse = "";
-        doc["tempCelsius"] = String(tempCelsius);
+        doc["temp"] = String(senseur.temperature_actuelle);
         serializeJsonPretty(doc,jsonresponse);
         doc.clear();
         request->send(200, "application/json", jsonresponse);
     });
     server.on("/obtenirTemperatureCibleMin", HTTP_GET, [](AsyncWebServerRequest *request){
         jsonresponse = "";
-        doc["tempCibleMin"] = String(tempCibleMin);
+        doc["tempMin"] = String(senseur.temperature_min);
         serializeJsonPretty(doc,jsonresponse);
         doc.clear();
         request->send(200, "application/json", jsonresponse);
     });
     server.on("/obtenirTemperatureCibleMax", HTTP_GET, [](AsyncWebServerRequest *request){
         jsonresponse = "";
-        doc["tempCibleMax"] = String(tempCibleMax);
+        doc["tempMax"] = String(senseur.temperature_max);
         serializeJsonPretty(doc,jsonresponse);
         doc.clear();
         request->send(200, "application/json", jsonresponse);
     });
     server.on("/obtenirPausePompe", HTTP_GET, [](AsyncWebServerRequest *request){
         jsonresponse = "";
-        doc["pause"] = String(pompePause);
+        doc["pause"] = String(pompe.pause);
         serializeJsonPretty(doc,jsonresponse);
         doc.clear();
         request->send(200, "application/json", jsonresponse);
     });
     server.on("/obtenirDureePompe", HTTP_GET, [](AsyncWebServerRequest *request){
         jsonresponse = "";
-        doc["duree"] = String(pompeDuree);
+        doc["duree"] = String(pompe.duree);
         serializeJsonPretty(doc,jsonresponse);
         doc.clear();
         request->send(200, "application/json", jsonresponse);
@@ -271,9 +229,8 @@ void setup() {
         if(request->url() == "/choisirTemperatureCibleMax" && tokenok){
             if(request->method() == HTTP_POST)
             {
-                tempCibleMax = atoi(doc["tempCelsius"]);
+                senseur.set_temperature_max(atoi(doc["tempMax"]));
                 doc.clear();
-                EEPROM.write(0, tempCibleMax);
                 EEPROM.commit();
                 request->send(200, "application/json", "{\"message\":\"Changement de la température maximum réussi\"}");
             }
@@ -282,9 +239,8 @@ void setup() {
         {
             if(request->method() == HTTP_POST)
             {
-                tempCibleMin = atoi(doc["tempCelsius"]);
+                senseur.set_temperature_min(atoi(doc["tempMin"]));
                 doc.clear();
-                EEPROM.write(1, tempCibleMin);
                 EEPROM.commit();
                 request->send(200, "application/json", "{\"message\":\"Changement de la température minimum réussi\"}");
             }
@@ -293,9 +249,8 @@ void setup() {
         {
             if(request->method() == HTTP_POST)
             {
-                pompePause = atoi(doc["pause"]);
+                pompe.set_pause(atoi(doc["pause"]));
                 doc.clear();
-                EEPROM.write(2, pompePause);
                 EEPROM.commit();
                 request->send(200, "application/json", "{\"message\":\"Changement de pause réussi\"}");
             }
@@ -304,9 +259,8 @@ void setup() {
         {
             if(request->method() == HTTP_POST)
             {
-                pompeDuree = atoi(doc["duree"]);
+                pompe.set_duree(atoi(doc["duree"]));
                 doc.clear();
-                EEPROM.write(3, pompeDuree);
                 EEPROM.commit();
                 request->send(200, "application/json", "{\"message\":\"Changement de durée réussi\"}");
             }
@@ -352,44 +306,43 @@ void setup() {
     delay(100);
 }
 void loop() {
-    sensors.requestTemperatures();
-    tempCelsius = sensors.getTempCByIndex(0);
-    //Serial.println(String(tempCelsius));
+    senseur.set_temperature_actuelle();
+    //Serial.println(String(senseur.temperature_actuelle));
     
-    if(tempCelsius > float(tempCibleMax)+1)
+    if(senseur.temperature_actuelle > float(senseur.temperature_max)+1)
     {
         if(digitalRead(pinHeatpad) == HIGH)
         {
             digitalWrite(pinHeatpad, LOW);
         }
     }
-    else if(tempCelsius < float(tempCibleMin))
+    else if(senseur.temperature_actuelle < float(senseur.temperature_min))
     {
         if(digitalRead(pinHeatpad) == LOW)
         {
             digitalWrite(pinHeatpad, HIGH);
         }
     }
-    if(digitalRead(pinPompe) == HIGH)
+    if(digitalRead(pompe.pin) == HIGH)
     {
-        Serial.println("Ouvert : "+String((time(&now) % (pompePause * 60))));
+        Serial.println("Ouvert : "+String((time(&now) % (pompe.pause * 60))));
         //if(dureePompeTimer >= (pompeDuree*60000))
-        if( (time(&now) % (pompeDuree * 60)) == 0)
+        if( (time(&now) % (pompe.duree * 60)) == 0)
         {
-            digitalWrite(pinPompe, LOW);
+            digitalWrite(pompe.pin, LOW);
             delay(3000);
         }
     }
-    else if(digitalRead(pinPompe) == LOW)
+    else if(digitalRead(pompe.pin) == LOW)
     {
-        Serial.println("Ferme : "+String((time(&now) % (pompePause * 60))));
+        Serial.println("Ferme : "+String((time(&now) % (pompe.pause * 60))));
         //if(PausePompeTimer  >= (pompePause*60000)) 
-        if( (time(&now) % (pompePause * 60)) == 0)
+        if( (time(&now) % (pompe.pause * 60)) == 0)
         {
-            digitalWrite(pinPompe, HIGH);
+            digitalWrite(pompe.pin, HIGH);
             delay(3000);
         }
     }
-    displayoled();
+    display_oled();
     delay(250);
 }
